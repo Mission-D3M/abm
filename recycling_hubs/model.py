@@ -4,7 +4,7 @@ from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector
 import numpy as np
 import random
-from agents import ProjectAgent, DemolitionProjectAgent, ConstructionProjectAgent, RecyclingHub
+from agents import ProjectAgent, DemolitionProjectAgent, ConstructionProjectAgent, RecyclingHub, ConventionalWasteRecycling
 from utils import Status
 
 
@@ -20,11 +20,16 @@ def calculate_recycled_hub(model):
     construction_agents_amounts = [agent.amount_hub for agent in model.schedule.agents
                                    if isinstance(agent, ConstructionProjectAgent)]
     return np.sum(construction_agents_amounts)*1.
+    #return 100.
 
-
-def calculate_non_circular(model):
+def calculate_not_recycled(model):
     agents_amounts = [agent.amount_non_circular for agent in model.schedule.agents
-                      if isinstance(agent, ProjectAgent)]
+                      if isinstance(agent, DemolitionProjectAgent)]
+    return np.sum(agents_amounts)*1.
+
+def calculate_raw_material_consumed(model):
+    agents_amounts = [agent.amount_non_circular for agent in model.schedule.agents
+                      if isinstance(agent, ConstructionProjectAgent)]
     return np.sum(agents_amounts)*1.
 
 
@@ -54,41 +59,47 @@ class ConcreteRecyclingModel(Model):
         self.datacollector = DataCollector(
             model_reporters={"Amount direct recycled": calculate_recycled,
                              "Amount recycled via hub": calculate_recycled_hub,
+                             "Amount not recycled": calculate_not_recycled,
+                             "Amount raw material consumed": calculate_raw_material_consumed,
                              "Stock level hubs": get_stock_level_hubs},
 
             agent_reporters={"Amount": lambda agent: agent.unique_id})
 
         # create construction hubs
-        hubs = []
-        for i in range(self.num_hubs):
-            a = RecyclingHub(self.next_id(), self)
-            x = self.random.randrange(self.width)
-            y = self.random.randrange(self.height)
-            self.grid.place_agent(a, (x, y))
-            hubs.append(a)
-            self.schedule.add(a)
+        if num_hubs > 0:
+            hubs = []
+            for i in range(self.num_hubs):
+                a = RecyclingHub(self.next_id(), self)
+                x = self.random.randrange(self.width)
+                y = self.random.randrange(self.height)
+                self.grid.place_agent(a, (x, y))
+                hubs.append(a)
+                self.schedule.add(a)
 
 
         # Create agents
+
         for i in range(self.num_demolition):
             hub = None
             if num_hubs > 0:
                 hub = random.choice(hubs)
 
-            a = DemolitionProjectAgent(self.next_id(), self, hub=hub, status=Status.active, material_amount=100.)
+            a = DemolitionProjectAgent(self.next_id(), self, hub=hub, lifespan=duration, status=Status.active, material_amount=70.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
             self.schedule.add(a)
 
         for i in range(self.num_construction):
-            a = ConstructionProjectAgent(self.next_id(), self, status=Status.active, material_amount=70.)
+            hub = None
+            if num_hubs > 0:
+                hub = random.choice(hubs)
+
+            a = ConstructionProjectAgent(self.next_id(), self, hub=hub, lifespan=duration, status=Status.active, material_amount=100.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
             self.schedule.add(a)
-
-
 
         self.running = True
         self.datacollector.collect(self)
@@ -98,5 +109,5 @@ class ConcreteRecyclingModel(Model):
         self.schedule.step()
         self.datacollector.collect(self)
         self.tick_counter += 1
-        if self.tick_counter >= self.duration:
+        if self.tick_counter >= self.duration+3:
             self.running = False

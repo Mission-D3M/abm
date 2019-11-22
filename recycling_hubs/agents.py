@@ -11,16 +11,42 @@ class RecyclingHub(Agent):
     def get_available_capacity(self):
         return self.max_capacity-self.stock_level
 
+    def has_capacity(self):
+        return self.get_available_capacity() > 0
+
+
     def load(self, amount):
         if self.stock_level + amount > self.max_capacity:
             raise ValueError
         else:
             self.stock_level += amount
-            print("new stock level: {}".format(self.stock_level))
+            #print("new stock level: {}".format(self.stock_level))
+
+    def remove(self, amount):
+        if amount > self.stock_level:
+            raise ValueError("stock level not high enough")
+        else:
+            self.stock_level -= amount
 
     def step(self):
-        if self.stock_level >= self.max_capacity:
+        if self.stock_level > self.max_capacity:
             print("+++++++++++++++FULL+++++++++++++++")
+
+
+class ConventionalWasteRecycling:
+    def __init__(self):
+        self.amount_transfered = 0.
+
+    def dump(self, amount):
+        self.amount_transfered += amount
+
+
+class RawMaterialSupply:
+    def __init__(self):
+        self.amount_transfered = 0.
+
+    def buy(self, amount):
+        self.amount_transfered += amount
 
 
 class ProjectAgent(Agent):
@@ -52,20 +78,39 @@ class DemolitionProjectAgent(ProjectAgent):
 
         """waste generation pattern (amount of waste generated per day)"""
         #self.waste_generation_pattern = waste_generation_pattern
+        self.conv_recycling = ConventionalWasteRecycling()
 
     def step(self):
-        self.lifespan -= 1
         current_balance = self.account_material_balance()
+        if current_balance == 0.:
+            self.status = Status.finished
 
-        if self.lifespan > 0 and current_balance > 0.:
+        if self.status == Status.active:
             self.move()
 
-            if self.hub is not None:
-                current_balance = self.transfer_to_hub(current_balance)
-            current_balance = self.transfer_to_construction(current_balance)
+            if current_balance == 0 and self.status != Status.finished:
+                print("NOT FINISHED: {} with BALANCE: {}".format(self.status, current_balance))
+            if self.lifespan == 0 and self.status != Status.finished:
+                print("NOT FINISHED: {} with lifespan: {}".format(self.status, self.lifespan))
 
-        if self.lifespan == 0 or current_balance == 0.:
-            self.status = Status.finished
+            #if self.lifespan > 0:
+            if current_balance > 0.:
+                if self.hub is not None:
+                    if self.hub.has_capacity():
+                        current_balance = self.transfer_to_hub(current_balance)
+                else:
+                    current_balance = self.transfer_to_construction(current_balance)
+
+            if current_balance == 0.:
+                self.status = Status.finished
+
+            # last step with remaining material left.
+            if self.lifespan == 1 and current_balance > 0:
+                self.conv_recycling.dump(current_balance)
+                self.amount_non_circular += current_balance
+                self.status = Status.finished
+
+            self.lifespan -= 1
 
     def move(self):
         possible_steps = self.model.grid.get_neighborhood(
@@ -110,15 +155,56 @@ class DemolitionProjectAgent(ProjectAgent):
 """Construction agents don't move !!!!!!!!!!!!!"""
 class ConstructionProjectAgent(ProjectAgent):
     """An agent doing a demolition project for a given company"""
-    def __init__(self, unique_id, model, lifespan=20, status=Status.passive, material_amount=0.):
-        super().__init__(unique_id, model, lifespan=lifespan, status=status, material_amount=material_amount)
+    def __init__(self, unique_id, model, hub=None, lifespan=20, status=Status.passive, material_amount=0.):
+        super().__init__(unique_id, model, hub=hub, lifespan=lifespan, status=status, material_amount=material_amount)
 
-    def step(self):
+        self.raw_material_supply = RawMaterialSupply()
+
+    def step_old(self):
         # The agent's step will go here.
-        self.lifespan -= 1
         if self.lifespan == 0 or self.account_material_balance() == 0.:
             self.status = Status.finished
 
+        self.lifespan -= 1
+
+    def step(self):
+        current_balance = self.account_material_balance()
+        if current_balance == 0.:
+            self.status = Status.finished
+
+        if self.status == Status.active:
+
+            if current_balance == 0 and self.status != Status.finished:
+                print("NOT FINISHED: {} with BALANCE: {}".format(self.status, current_balance))
+            if self.lifespan == 0 and self.status != Status.finished:
+                print("NOT FINISHED: {} with lifespan: {}".format(self.status, self.lifespan))
+
+            # if self.lifespan > 0:
+            if current_balance > 0.:
+                if self.hub is not None:
+                    #if self.hub.has_capacity():
+                    current_balance = self.transfer_from_hub(current_balance)
+                #else:
+                    #current_balance = self.transfer_to_construction(current_balance)
+
+            if current_balance == 0.:
+                self.status = Status.finished
+
+            # last step with remaining material left.
+            if self.lifespan == 1 and current_balance > 0:
+                #print("agent id {}, current balance: {}, non_circular before bying: {}".format(self.unique_id, current_balance, self.amount_non_circular))
+                self.raw_material_supply.buy(current_balance)
+                self.amount_non_circular += current_balance
+                #print("amount non_circular after bying: {}".format(self.amount_non_circular))
+                self.status = Status.finished
+
+            self.lifespan -= 1
+
+    def transfer_from_hub(self, amount):
+        amount_transfered = min(amount, self.hub.stock_level)
+        self.amount_hub += amount_transfered
+        self.hub.remove(amount_transfered)
+        return self.account_material_balance()
 
 class DemolitionSite:
     """A building to be demolished"""
