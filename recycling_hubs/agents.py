@@ -1,3 +1,4 @@
+import numpy as np
 from mesa import Agent
 from utils import Status
 
@@ -72,13 +73,22 @@ class ProjectAgent(Agent):
 
 class DemolitionProjectAgent(ProjectAgent):
     """An agent doing a demolition project for a given company"""
-    def __init__(self, unique_id, model, hub=None, lifespan=20, status=Status.passive, material_amount=0.):
+    def __init__(self, unique_id, model, tendency_recycling=1., hub=None, lifespan=20, status=Status.passive, material_amount=0.):
 
         super().__init__(unique_id, model, hub=hub, lifespan=lifespan, status=status, material_amount=material_amount)
+
+        self.tendency_recycling = tendency_recycling
+        self.recycling_variants = ['R', 'NR']
+        self.recycling_distribution = [tendency_recycling, 1-tendency_recycling]
 
         """waste generation pattern (amount of waste generated per day)"""
         #self.waste_generation_pattern = waste_generation_pattern
         self.conv_recycling = ConventionalWasteRecycling()
+
+    def is_recycling(self):
+        chosen_recycling_variant = np.random.choice(self.recycling_variants, 1, p=self.recycling_distribution, replace=True)
+        return chosen_recycling_variant == 'R'
+
 
     def step(self):
         current_balance = self.account_material_balance()
@@ -93,8 +103,7 @@ class DemolitionProjectAgent(ProjectAgent):
             if self.lifespan == 0 and self.status != Status.finished:
                 print("NOT FINISHED: {} with lifespan: {}".format(self.status, self.lifespan))
 
-            #if self.lifespan > 0:
-            if current_balance > 0.:
+            if current_balance > 0. and self.is_recycling():
                 if self.hub is not None:
                     if self.hub.has_capacity():
                         current_balance = self.transfer_to_hub(current_balance)
@@ -120,6 +129,11 @@ class DemolitionProjectAgent(ProjectAgent):
         )
         new_position = self.random.choice(possible_steps)
         self.model.grid.move_agent(self, new_position)
+
+    def transfer_to_conv_recycling(self, amount):
+        self.conv_recycling.dump(amount)
+        self.amount_non_circular += amount
+        self.status = Status.finished
 
     def transfer_to_hub(self, amount):
         amount_transfered = min(amount, self.hub.get_available_capacity())
