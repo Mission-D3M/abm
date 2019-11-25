@@ -41,8 +41,10 @@ def agent_portrayal(agent):
 
         if agent.status == Status.finished:
             portrayal["Color"] = "grey"
-        else:
+        elif agent.is_recycling:
             portrayal["Color"] = "green"
+        else:
+            portrayal["Color"] = "brown"
 
     elif isinstance(agent, ConstructionProjectAgent):
         portrayal["Layer"] = 2
@@ -61,11 +63,14 @@ def agent_portrayal(agent):
 grid = CanvasGrid(agent_portrayal, 20, 20, 500, 500)
 
 
-line_chart = ChartModule([{"Label": "Amount direct recycled", "Color": RECYCLING_COLOR},
+line_chart_recycling = ChartModule([{"Label": "Amount direct recycled", "Color": RECYCLING_COLOR},
                           {"Label": "Amount recycled via hub", "Color": RECYCLING_VIA_HUB_COLOR},
                           {"Label": "Stock level hubs", "Color": HUB_COLOR},
                           {"Label": "Amount not recycled", "Color": NOT_RECYCLED_COLOR},
                           {"Label": "Amount raw material consumed", "Color": RAW_MATERIAL_CONSUMED_COLOR}])
+
+line_chart_material_flow = ChartModule([{"Label": "Demolition Material Flow", "Color": "red"},
+                          {"Label": "Construction Material Flow", "Color": "green"}])
 
 model_params = {"num_demolition": UserSettableParameter("slider", "Demolition Projects", 20, 1, 50,
                       description="Initial Number of Demolition Project Agents"),
@@ -74,13 +79,15 @@ model_params = {"num_demolition": UserSettableParameter("slider", "Demolition Pr
                       description="Initial Number of Construction Project Agents"),
                 "num_hubs": UserSettableParameter("slider", "Number of Recycling Hubs", 1, 0, 7,
                       description="Number Recycling Hub Agents"),
-                "duration": UserSettableParameter("slider", "Duration", 20, 0, 50,
-                      description="Duration of the simulation, equal to max number of step agents perform")}
+                "event_rate": UserSettableParameter("slider", "Event Rate for Demolition", 5., 0.5, 10.,
+                      description="Event rate determines pattern of demolition and construction material flow"),
+                "recycling_tendency_percentage": UserSettableParameter("slider", "Demolition Agent's tendency towards Recycling", 100., 0.,100.,
+                      description="Probability that a demolition chooses to recycle waste")}
 
 # create server, the last params are params needed by the money model:
 # number of agents:100, height and width:10
 server = ModularServer(ConcreteRecyclingModel,
-                       [grid, line_chart],
+                       [grid, line_chart_recycling, line_chart_material_flow],
                        "ConcreteRecyclingModel",
                       model_params=model_params)
 

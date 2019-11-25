@@ -1,10 +1,10 @@
 import numpy as np
 from mesa import Agent
-from utils import Status
+from utils import Status, calculate_flow, calculate_lifespan
 
 
 class RecyclingHub(Agent):
-    def __init__(self, unique_id, model, max_capacity=1000.):
+    def __init__(self, unique_id, model, max_capacity=100.):
         super().__init__(unique_id, model)
         self.stock_level: float = 0.
         self.max_capacity = max_capacity
@@ -14,7 +14,6 @@ class RecyclingHub(Agent):
 
     def has_capacity(self):
         return self.get_available_capacity() > 0
-
 
     def load(self, amount):
         if self.stock_level + amount > self.max_capacity:
@@ -52,74 +51,120 @@ class RawMaterialSupply:
 
 class ProjectAgent(Agent):
 
-    def __init__(self, unique_id, model, hub=None, lifespan=20, status=Status.passive, material_amount=0.):
+    def __init__(self, unique_id, model, hub=None, event_rate=5., status=Status.passive, total_amount=0.):
         super().__init__(unique_id, model)
-        """reference to the  site"""
-        self.lifespan = lifespan
+
+        self.max_lifespan = calculate_lifespan(event_rate)
+        self.EPS = 0.09
+
+        self.lifespan = 0
         self.status = status
 
-        """amount of material to generated or needed"""
-        self.material_amount: float = material_amount
-
+        """total amount of material generated or needed"""
+        self.total_amount: float = total_amount
         self.amount_recycled: float = 0.
         self.amount_hub: float = 0.
         self.amount_non_circular: float = 0.
 
         self.hub = hub
+        self.current_amount = 0.
+        self.is_recycling = True
+        self.event_rate = event_rate
+        self.loc = 0.
 
-    def account_material_balance(self):
-        return self.material_amount - (self.amount_recycled + self.amount_hub + self.amount_non_circular)
+    def total_amount_balance(self):
+        return self.total_amount - (self.amount_recycled + self.amount_hub + self.amount_non_circular)
+
+    def advance_amount_one_step(self):
+        time = self.lifespan
+        delta_amount = calculate_flow(self.total_amount, time, event_rate=self.event_rate, loc=self.loc)
+        self.current_amount += delta_amount
+        #print("current amount is now:{}".format(self.current_amount))
+
+    # def current_amount_balance(self):
+    #     return self.current_amount - (self.amount_recycled + self.amount_hub + self.amount_non_circular)
+
+    def step(self):
+        self.advance_amount_one_step()
+
+        if self.status == Status.passive:
+            #if self.current_amount_balance() > 0.:
+            if self.current_amount > self.EPS:
+                self.status = Status.active
+        elif self.status == Status.active:
+
+            #if self.total_amount_balance() == 0:
+            if self.total_amount_balance() < self.EPS:
+                print("finished")
+                self.status = Status.finished
+            else:
+                if isinstance(self, DemolitionProjectAgent): print("active status balance before doing business:" + str(self.total_amount_balance()))
+                self.do_business()
+                if isinstance(self, DemolitionProjectAgent): print("active status balance after doing business:" + str(self.total_amount_balance()))
+
+                if self.total_amount_balance() < self.EPS:
+                    self.status = Status.finished
+            #last step
+            if self.max_lifespan - self.lifespan == 1:
+                self.status = Status.lifespan_alert
+        elif self.status == Status.lifespan_alert:
+            self.do_business()
+            #print("last step" + str(self.total_amount_balance()))
+            if self.total_amount_balance() > self.EPS:
+                self.do_wrap_up()
+                self.status = Status.incomplete
+            else:
+                self.status = Status.finished
+        elif self.status == Status.finished:
+            pass
+        elif self.status == Status.incomplete:
+            pass
+        else:
+            print("unhandled status: {}".format(self.status))
+        self.lifespan += 1
 
 
 class DemolitionProjectAgent(ProjectAgent):
     """An agent doing a demolition project for a given company"""
-    def __init__(self, unique_id, model, tendency_recycling=1., hub=None, lifespan=20, status=Status.passive, material_amount=0.):
+    def __init__(self, unique_id, model, recycling_tendency=1., hub=None, event_rate=20, status=Status.passive, total_amount=0.):
 
-        super().__init__(unique_id, model, hub=hub, lifespan=lifespan, status=status, material_amount=material_amount)
+        super().__init__(unique_id, model, hub=hub, event_rate=event_rate, status=status, total_amount=total_amount)
 
-        self.tendency_recycling = tendency_recycling
-        self.recycling_variants = ['R', 'NR']
-        self.recycling_distribution = [tendency_recycling, 1-tendency_recycling]
-
-        """waste generation pattern (amount of waste generated per day)"""
-        #self.waste_generation_pattern = waste_generation_pattern
+        self.is_recycling = self.calculate_recycling(recycling_tendency)
+        # self.recycling_variants = ['R', 'NR']
+        # self.recycling_distribution = [recycling_tendency, 1-recycling_tendency]
         self.conv_recycling = ConventionalWasteRecycling()
 
-    def is_recycling(self):
-        chosen_recycling_variant = np.random.choice(self.recycling_variants, 1, p=self.recycling_distribution, replace=True)
+    def calculate_recycling(self, recycling_tendency):
+        recycling_variants = ['R', 'NR']
+        recycling_distribution = [recycling_tendency, 1 - recycling_tendency]
+        chosen_recycling_variant = np.random.choice(recycling_variants, 1, p=recycling_distribution, replace=True)
         return chosen_recycling_variant == 'R'
 
-
     def step(self):
-        current_balance = self.account_material_balance()
-        if current_balance == 0.:
-            self.status = Status.finished
+        super().step()
 
-        if self.status == Status.active:
-            self.move()
+    def do_business(self):
+        self.move()
+        amount = self.current_amount
 
-            if current_balance == 0 and self.status != Status.finished:
-                print("NOT FINISHED: {} with BALANCE: {}".format(self.status, current_balance))
-            if self.lifespan == 0 and self.status != Status.finished:
-                print("NOT FINISHED: {} with lifespan: {}".format(self.status, self.lifespan))
+        if self.is_recycling:
+            if self.hub is not None and self.hub.has_capacity():
+                self.transfer_to_hub(amount)
+            else:
+                self.transfer_to_construction(amount)
+        else:
+            self.transfer_to_conv_recycling(amount)
 
-            if current_balance > 0. and self.is_recycling():
-                if self.hub is not None:
-                    if self.hub.has_capacity():
-                        current_balance = self.transfer_to_hub(current_balance)
-                else:
-                    current_balance = self.transfer_to_construction(current_balance)
+    def do_wrap_up(self):
+        amount = self.total_amount_balance()
+        #print("wrap up Demolition, current amount: {}, total amount balance:{}".format(self.current_amount, amount))
+        self.conv_recycling.dump(amount)
+        self.amount_non_circular += amount
+        self.current_amount -= amount
+        if abs(self.current_amount) > self.EPS:
+            print("++++++++++++++ something miss with current amount: {}".format(self.current_amount))
 
-            if current_balance == 0.:
-                self.status = Status.finished
-
-            # last step with remaining material left.
-            if self.lifespan == 1 and current_balance > 0:
-                self.conv_recycling.dump(current_balance)
-                self.amount_non_circular += current_balance
-                self.status = Status.finished
-
-            self.lifespan -= 1
 
     def move(self):
         possible_steps = self.model.grid.get_neighborhood(
@@ -133,27 +178,21 @@ class DemolitionProjectAgent(ProjectAgent):
     def transfer_to_conv_recycling(self, amount):
         self.conv_recycling.dump(amount)
         self.amount_non_circular += amount
-        self.status = Status.finished
+        self.current_amount -= amount
 
     def transfer_to_hub(self, amount):
         amount_transfered = min(amount, self.hub.get_available_capacity())
         self.amount_recycled += amount_transfered
         self.hub.load(amount_transfered)
-        return self.account_material_balance()
+        self.current_amount -= amount
 
     def transfer_to_construction(self, amount):
-        if amount > 0:
-            self.recycle(amount)
-        return self.account_material_balance()
 
-    def recycle(self, amount):
-
-        cellmates = self.model.grid.get_cell_list_contents([self.pos])
-
+        neighbours = self.model.grid.get_neighbors(self.pos, moore=False, include_center=True)
         construction_agents = []
-        for c in cellmates:
-            if isinstance(c, ConstructionProjectAgent) and c.status == Status.active:
-                construction_agents.append(c)
+        for n in neighbours:
+            if isinstance(n, ConstructionProjectAgent) and n.status == Status.active:
+                construction_agents.append(n)
 
         if len(construction_agents) > 0:
             if len(construction_agents) > 1:
@@ -161,81 +200,50 @@ class DemolitionProjectAgent(ProjectAgent):
             else:
                 other = construction_agents[0]
 
-            amount_transfered = min(amount, other.account_material_balance())
+            amount_transfered = min(amount, other.current_amount)
+            #print("amount: {}, total balance: {}, other.current_amount: {}".format(amount, self.total_amount_balance(), other.current_amount))
+            self.current_amount -= amount_transfered
+            other.current_amount -= amount_transfered
             self.amount_recycled += amount_transfered
             other.amount_recycled += amount_transfered
 
 
-"""Construction agents don't move !!!!!!!!!!!!!"""
 class ConstructionProjectAgent(ProjectAgent):
     """An agent doing a demolition project for a given company"""
-    def __init__(self, unique_id, model, hub=None, lifespan=20, status=Status.passive, material_amount=0.):
-        super().__init__(unique_id, model, hub=hub, lifespan=lifespan, status=status, material_amount=material_amount)
+    def __init__(self, unique_id, model, hub=None, event_rate=20, status=Status.passive, total_amount=0.):
+        super().__init__(unique_id, model, hub=hub, event_rate=event_rate*2, status=status, total_amount=total_amount)
 
         self.raw_material_supply = RawMaterialSupply()
+        self.loc = -2.
 
-    def step_old(self):
-        # The agent's step will go here.
-        if self.lifespan == 0 or self.account_material_balance() == 0.:
-            self.status = Status.finished
 
-        self.lifespan -= 1
+    def do_business(self):
+        """Construction agents don't move"""
 
-    def step(self):
-        current_balance = self.account_material_balance()
-        if current_balance == 0.:
-            self.status = Status.finished
+        #amount = self.current_amount_balance()
+        amount = self.current_amount
 
-        if self.status == Status.active:
-
-            if current_balance == 0 and self.status != Status.finished:
-                print("NOT FINISHED: {} with BALANCE: {}".format(self.status, current_balance))
-            if self.lifespan == 0 and self.status != Status.finished:
-                print("NOT FINISHED: {} with lifespan: {}".format(self.status, self.lifespan))
-
-            # if self.lifespan > 0:
-            if current_balance > 0.:
-                if self.hub is not None:
-                    #if self.hub.has_capacity():
-                    current_balance = self.transfer_from_hub(current_balance)
-                #else:
-                    #current_balance = self.transfer_to_construction(current_balance)
-
-            if current_balance == 0.:
-                self.status = Status.finished
-
-            # last step with remaining material left.
-            if self.lifespan == 1 and current_balance > 0:
-                #print("agent id {}, current balance: {}, non_circular before bying: {}".format(self.unique_id, current_balance, self.amount_non_circular))
-                self.raw_material_supply.buy(current_balance)
-                self.amount_non_circular += current_balance
-                #print("amount non_circular after bying: {}".format(self.amount_non_circular))
-                self.status = Status.finished
-
-            self.lifespan -= 1
+        if self.is_recycling:
+            if self.hub is not None:
+                self.transfer_from_hub(amount)
+        #else:
+            #self.raw_material_supply.buy(amount)
+            #self.amount_non_circular += amount
 
     def transfer_from_hub(self, amount):
         amount_transfered = min(amount, self.hub.stock_level)
         self.amount_hub += amount_transfered
         self.hub.remove(amount_transfered)
-        return self.account_material_balance()
+        self.current_amount -= amount_transfered
 
-class DemolitionSite:
-    """A building to be demolished"""
+    def do_wrap_up(self):
+        amount = self.total_amount_balance()
+        self.raw_material_supply.buy(amount)
+        self.amount_non_circular += amount
+        self.current_amount -= amount
+        if abs(self.current_amount) > self.EPS:
+            print("++++++++++++++ something miss with current amount: {}".format(self.current_amount))
 
-    def __init__(self, location, size, construction_year, factor_concrete):
-
-        """geo position of the site"""
-        self.location = location
-        self.construction_year = construction_year
-        """size in square meter"""
-        self.size = size
-
-        """factor to calculate amount of concrete demolition will generate"""
-        self.factor_concrete = factor_concrete
-
-    def calculate_supply(self):
-        return self.factor_concrete * self.size
-
-
+    def step(self):
+        super().step()
 

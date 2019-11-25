@@ -4,8 +4,8 @@ from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector
 import numpy as np
 import random
-from agents import ProjectAgent, DemolitionProjectAgent, ConstructionProjectAgent, RecyclingHub, ConventionalWasteRecycling
-from utils import Status
+from agents import DemolitionProjectAgent, ConstructionProjectAgent, RecyclingHub, ConventionalWasteRecycling
+from utils import Status, calculate_lifespan
 
 
 """only count once, we take the construction side"""
@@ -37,20 +37,32 @@ def get_stock_level_hubs(model):
     hubs = [agent.stock_level for agent in model.schedule.agents if isinstance(agent, RecyclingHub)]
     return np.sum(hubs)*1.
 
+
+def get_demolition_current_amount(model):
+    amount = [agent.current_amount for agent in model.schedule.agents if isinstance(agent, DemolitionProjectAgent)]
+    return np.sum(amount)*1.
+
+
+def get_construction_current_amount(model):
+    amount = [agent.current_amount for agent in model.schedule.agents if isinstance(agent, ConstructionProjectAgent)]
+    return np.sum(amount)*1.
+
 class ConcreteRecyclingModel(Model):
 
     """A model with some number of agents."""
-    def __init__(self, num_demolition, num_construction, num_hubs=1, duration=365, width=20, height=20):
+    def __init__(self, num_demolition, num_construction, recycling_tendency_percentage, num_hubs=1, event_rate=10., width=20, height=20):
 
         super().__init__()
 
         self.width = width
         self.height = height
-        self.duration = duration
+        #self.duration = calculate_lifespan(event_rate)
+        self.duration = 60
         self.tick_counter = 0
 
         self.num_demolition = num_demolition
         self.num_construction = num_construction
+        self.recycling_tendency = recycling_tendency_percentage/100
         self.num_hubs = num_hubs
 
         self.grid = MultiGrid(self.width, self.height, True)
@@ -61,7 +73,9 @@ class ConcreteRecyclingModel(Model):
                              "Amount recycled via hub": calculate_recycled_hub,
                              "Amount not recycled": calculate_not_recycled,
                              "Amount raw material consumed": calculate_raw_material_consumed,
-                             "Stock level hubs": get_stock_level_hubs},
+                             "Stock level hubs": get_stock_level_hubs,
+                             "Demolition Material Flow": get_demolition_current_amount,
+                             "Construction Material Flow": get_construction_current_amount},
 
             agent_reporters={"Amount": lambda agent: agent.unique_id})
 
@@ -84,7 +98,8 @@ class ConcreteRecyclingModel(Model):
             if num_hubs > 0:
                 hub = random.choice(hubs)
 
-            a = DemolitionProjectAgent(self.next_id(), self, hub=hub, lifespan=duration, status=Status.active, material_amount=70.)
+            a = DemolitionProjectAgent(self.next_id(), self, recycling_tendency=self.recycling_tendency,
+                                       hub=hub, event_rate=event_rate, status=Status.passive, total_amount=100.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
@@ -95,7 +110,8 @@ class ConcreteRecyclingModel(Model):
             if num_hubs > 0:
                 hub = random.choice(hubs)
 
-            a = ConstructionProjectAgent(self.next_id(), self, hub=hub, lifespan=duration, status=Status.active, material_amount=100.)
+            a = ConstructionProjectAgent(self.next_id(), self,
+                                         hub=hub, event_rate=event_rate, status=Status.active, total_amount=100.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
@@ -109,5 +125,5 @@ class ConcreteRecyclingModel(Model):
         self.schedule.step()
         self.datacollector.collect(self)
         self.tick_counter += 1
-        if self.tick_counter >= self.duration+3:
+        if self.tick_counter >= self.duration+5:
             self.running = False
