@@ -50,14 +50,17 @@ def get_construction_current_amount(model):
 class ConcreteRecyclingModel(Model):
 
     """A model with some number of agents."""
-    def __init__(self, num_demolition, num_construction, recycling_tendency_percentage, num_hubs=1, event_rate=10., width=20, height=20):
+    def __init__(self, num_demolition, num_construction, recycling_tendency_percentage, num_hubs=1, event_rate_construction=5., event_rate_demolition=3., width=20, height=20):
 
         super().__init__()
 
         self.width = width
         self.height = height
+
+        ## TODO calculate duration
         #self.duration = calculate_lifespan(event_rate)
-        self.duration = 60
+
+        self.duration = 37
         self.tick_counter = 0
 
         self.num_demolition = num_demolition
@@ -73,9 +76,9 @@ class ConcreteRecyclingModel(Model):
                              "Amount recycled via hub": calculate_recycled_hub,
                              "Amount not recycled": calculate_not_recycled,
                              "Amount raw material consumed": calculate_raw_material_consumed,
-                             "Stock level hubs": get_stock_level_hubs,
-                             "Demolition Material Flow": get_demolition_current_amount,
-                             "Construction Material Flow": get_construction_current_amount},
+                             "Stock level materials in hubs": get_stock_level_hubs,
+                             "Supply demolition materials": get_demolition_current_amount,
+                             "Demand construction materials": get_construction_current_amount},
 
             agent_reporters={"Amount": lambda agent: agent.unique_id})
 
@@ -92,14 +95,13 @@ class ConcreteRecyclingModel(Model):
 
 
         # Create agents
-
         for i in range(self.num_demolition):
             hub = None
             if num_hubs > 0:
                 hub = random.choice(hubs)
 
             a = DemolitionProjectAgent(self.next_id(), self, recycling_tendency=self.recycling_tendency,
-                                       hub=hub, event_rate=event_rate, status=Status.passive, total_amount=100.)
+                                       hub=hub, event_rate=event_rate_demolition, status=Status.passive, total_amount=100.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
@@ -111,7 +113,7 @@ class ConcreteRecyclingModel(Model):
                 hub = random.choice(hubs)
 
             a = ConstructionProjectAgent(self.next_id(), self,
-                                         hub=hub, event_rate=event_rate, status=Status.active, total_amount=100.)
+                                         hub=hub, event_rate=event_rate_construction, status=Status.active, total_amount=100.)
             x = self.random.randrange(self.width)
             y = self.random.randrange(self.height)
             self.grid.place_agent(a, (x, y))
@@ -125,5 +127,5 @@ class ConcreteRecyclingModel(Model):
         self.schedule.step()
         self.datacollector.collect(self)
         self.tick_counter += 1
-        if self.tick_counter >= self.duration+5:
+        if self.tick_counter >= self.duration:
             self.running = False
