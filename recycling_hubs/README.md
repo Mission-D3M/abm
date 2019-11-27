@@ -1,63 +1,48 @@
-
-
 # Agent based modeling 
 
-Goal: Simulation of stakeholder behavior of recycling concrete ...
+The goal of this protoype is as follows:
+Construction hubs improve the circularity in the construction sector 
+by optimizing the alignment of material flow from demolition to construction sites
 
-## Demolition Company Agent
-
-### Attributes 	
-       
-    name:company name
-	type:string
-    
-    name: factor indicating capability to recycle concrete for construction
-	type: double
-
-	name: project ids
-	type: list of unique keys to demolition projects, initialized at startup
+We prove that by simulating the interactions of demolition and construction companies, 
+represented by project agents by assessing their effects on the reverse logistics of the construction sector in the province.
 
 
-	name: total amount (in cubic meter) of recycled waste for construction use
-	type: integer
+## Model Specification
 
-	name: total amount (in cubic meter) of recycled waste
-   	type: integer
+The objective is to build a model capable of capturing the dynamic and interactive nature of main stakeholders 
+involved in the reverse logistics of demolition waste material.
+Agents involved besides demolition and construction companies, 
+are agents in the waste material generation and management
+chains such as transportation companies, material reusing companies, recycling companies, and waste incinerators.
 
-### Behavior
+For the model of a prototype, we aim for simplicity. 
+Therefore we identify a subset of the potential agents with which realistic behaviour generation is still possible. 
+Agents identified are construction and demolition project agents, 
+construction hub agent, conventional recycling agent, and raw material delivering agent.
 
-## Demolition Project Agent
+### Demolition Project Agent
+- Demolishes buildings and generates a progressive waste material flow within a defined period
+- Can search for a construction agent to cooperate with
+- Decides on the kind of demolition process: whether artifacts should be circularly reused for construction or not
+- Decides on how the waste material processing is continued: directly delivered to construction project agents site, 
+construction hub or conventional recycled. 
 
-### Attributes
-	
+### Construction Project Agent
+- Constructs buildings and consumes construction material with a specific time pattern
+- Accepts recycled material whenever available form construction hub or demolition project agents
+- Only buys raw material at the latest time and only when resources from construction hubs are exhausted
 
-	name: demolition site
-	type: DemolitionSite
+### Construction Hub Agent
+- Provides storage capacity for recycled material
+- Provides info on stock level
+- Rejects storage requests if capacity is reached
 
-	name: attitude towards  concrete waste generating behavior: 
-    type: enum {with/without the presence of impurities)
-    
-    name: waste generation pattern (amount of waste generated per day)
-	type: function (or parameter of Poisson distribution used)
-https://www.sciencedirect.com/topics/mathematics/poisson-distribution
+### Waste Recycling Agent
+- Accepts all offered material
 
-
-## Demolition Site - this is NOT an agent
-###Attributes
-	name:projectId
-	type: unique key
-
-	name:location
-	type:geoposition
-	
-	name: size in square meters
-	type: int
-
-	name: constructin year
-	type: int
-
-	name:factor of concrete used to calculate amount of concrete demolition will generate
-	type: double in [0,1]
+### Raw Material Supply Agent
+- Fulfills all requests for raw material
 	
 	
 
